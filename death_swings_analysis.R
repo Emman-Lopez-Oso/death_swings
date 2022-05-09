@@ -133,6 +133,23 @@ all_us <- all_us %>% rename(Trump_Rv = G20PRERTRU,
                   Fuente_Alliancev = G20PREOFUE, 
                   Hawkins_Greenv = G20PREGHAW,
                   Carrol_AmSolidv = G20PREACAR)
+# Create new subset of columns for all US 
+all_us_join <- 
+  all_us %>% 
+  select(
+    Biden_Dv,
+    Jorgen_Lv,
+    Blanken_Constv,
+    Pierce_Indv,
+    Fuente_Alliancev, 
+    Hawkins_Greenv,
+    Carrol_AmSolidv,
+    votes_dem_pct,
+    votes_rep_pct,
+    votes_gre_pct, #Green party votes
+    votes_lib_pct,
+    tot_pres_votes)
+
 
 # Spatial Join ---- 
 # I realized that I can't really join the precincts results to the death counts
@@ -140,29 +157,53 @@ all_us <- all_us %>% rename(Trump_Rv = G20PRERTRU,
 # over the place in terms of whether or not it has FIPS info, etc.
 sf::sf_use_s2(FALSE)
 
-all_us %>% 
-  st_join(usa_deaths %>%
-            select(STATEFP,COUNTYFP,GEOID,NAME,X2022.01.14),
-          join=st_within,
-          left = FALSE)
+death_swings_df <- usa_deaths %>%
+  select(STATEFP,COUNTYFP,GEOID,NAME,X2022.01.14) %>% 
+  st_join(all_us %>% 
+            st_point_on_surface(),
+          left = TRUE)
+names(death_swings_df)
 
-head(usa_deaths)
-
-# Figure out a way to get all of the non vote count variables pulled in so that 
-# we can figure out how to properly assess which variables can be used as IDs
-
-all_us <- all_us %>% 
-  select(!starts_with(c("G20","S20USS","C20","R21"))) 
-  
-
-mapview(usa_deaths %>% filter(STATEFP=='09'))+
-  mapview(all_us %>% filter(STATEFP20=='09'),
-          col.regions='orange',
-          alpha.regions=.1)
-
-st_collection_extract(all_us,"POLYGON")
-
-lapply(all_us,function(x) { length(which(is.na(x)))})
+death_swings_group <- 
+  death_swings_df %>% st_drop_geometry() %>% 
+  group_by(GEOID) %>% 
+  summarise(
+    state_fp = first(STATEFP),
+    cnty_fp = first(COUNTYFP),
+    geoid = first(GEOID),
+    tot_death = first(X2022.01.14),
+    tot_pres_votes= sum(tot_pres_votes),
+    Biden_Dv = sum(Biden_Dv),
+    Trump_Rv = sum(Trump_Rv),
+    Jorgen_Lv = sum(Jorgen_Lv),
+    Hawkins_Greenv = sum(Hawkins_Greenv)
+    
+  )
 
 
-unique(all_us$STATEFP20)
+death_swings_group <-  
+  death_swings_group %>% 
+  mutate(votes_dem_pct = Biden_Dv/tot_pres_votes,
+         votes_rep_pct = Trump_Rv/tot_pres_votes,
+         votes_gre_pct = Hawkins_Greenv/tot_pres_votes, #Green party votes
+         votes_lib_pct = Jorgen_Lv/tot_pres_votes)
+
+swing_counties <- death_swings_group %>% filter(between(votes_dem_pct,.47,.53))
+
+swing_counties <- swing_counties %>% mutate(pct_death_votes = tot_death/tot_pres_votes)
+
+view(swing_counties %>% filter(pct_death_votes>.01))
+
+# So it doesn't look like any swing precincts would be possible. But how about
+# the house of representatives? 
+con_dis <-congressional_districts()
+
+# Join the death swings group to the USA counties data 
+deaths_votes_county_shp <- usa %>% select("STATEFP"  ,"COUNTYFP" ,"COUNTYNS", "GEOID") %>% 
+  left_join(death_swings_group,by = "GEOID")
+
+# make the 
+
+
+
+
